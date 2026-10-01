@@ -1,0 +1,167 @@
+:root {
+    font-family: Inter, system-ui, sans-serif;
+    color: #f5f5f5;
+    background: #111318;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-width: 500px;
+    min-height: 100vh;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+.app {
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 60px 32px;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.header h1 {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    color: #9699a3;
+}
+
+.share-card,
+.join-card {
+    background: #191c23;
+    border: 1px solid #2a2e38;
+    border-radius: 16px;
+    padding: 32px;
+}
+
+.share-card {
+    text-align: center;
+}
+
+.share-icon {
+    font-size: 42px;
+    margin-bottom: 12px;
+}
+
+h2 {
+    margin-top: 0;
+}
+
+.description {
+    color: #9699a3;
+    line-height: 1.5;
+}
+
+.share-button,
+.join-button {
+    width: 100%;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 20px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.share-button {
+    background: #4f7cff;
+    color: white;
+    font-size: 16px;
+}
+
+.share-button:hover {
+    background: #3d6df0;
+}
+
+.share-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.join-button {
+    margin-top: 12px;
+    background: #292e38;
+    color: white;
+}
+
+input {
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid #343946;
+    background: #111318;
+    color: white;
+    outline: none;
+}
+
+input:focus {
+    border-color: #4f7cff;
+}
+
+.session-box {
+    margin-top: 24px;
+    padding: 20px;
+    border-radius: 12px;
+    background: #11151d;
+    border: 1px solid #303746;
+}
+
+.session-box strong {
+    display: block;
+    font-size: 24px;
+    letter-spacing: 2px;
+    margin: 8px 0;
+}
+
+.session-box p {
+    color: #858a96;
+    font-size: 13px;
+}
+
+.session-label {
+    color: #858a96;
+    font-size: 13px;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 28px 0;
+    color: #666b76;
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+    height: 1px;
+    background: #292e38;
+    flex: 1;
+}
+
+.join-card {
+    text-align: left;
+}
+
+.status {
+    margin-top: 20px;
+    padding: 14px;
+    border-radius: 8px;
+    background: #191c23;
+    color: #aeb4c0;
+    text-align: center;
+    font-size: 14px;
+}
