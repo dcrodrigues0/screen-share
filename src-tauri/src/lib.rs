@@ -1,15 +1,17 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use tauri_plugin_log::{Target, TargetKind};
+use tauri_plugin_log::{Target, TargetKind, log};
 
 #[tauri::command]
 fn start_screen_share() -> String {
     // Temporary implementation.
     // Later this should create a real session.
+    log::info!("Starting screen sharing session...");
     "ABC123".to_string()
 }
 
 #[tauri::command]
 fn join_screen_share(session_id: String) -> String {
+    log::info!("Joining session with ID: {}", session_id);
     format!("Joining session {}", session_id)
 }
 

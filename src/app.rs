@@ -2,7 +2,8 @@ use leptos::task::spawn_local;
 use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-
+use leptos::logging::log;
+use leptos::html::Input;
 
 #[wasm_bindgen]
 extern "C" {
@@ -30,7 +31,6 @@ pub fn App() -> impl IntoView {
 
     // Start sharing the screen
     let start_sharing = move |_| {
-        log::info!("Starting screen sharing session...");
         spawn_local(async move {
             let response = invoke(
                 "start_screen_share",
@@ -48,11 +48,17 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    let join_input: NodeRef<Input> = NodeRef::new();
+
     // Join an existing screen share
     let join_session = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let id = join_id.get_untracked();
-        log::info!("Attempting to join session with ID: {}", id);
+        
+        let id = join_input
+            .get()
+            .expect("Join input should be available")
+            .value();
+        
         if id.trim().is_empty() {
             set_status.set("Enter a session ID.".to_string());
             return;
@@ -149,33 +155,28 @@ pub fn App() -> impl IntoView {
             </div>
 
             <section class="join-card">
-
                 <h2>"Join a screen share"</h2>
 
                 <p class="description">
                     "Enter the session ID provided by the person sharing their screen."
                 </p>
 
-                <form on:submit=join_session>
+                <input  
+                    type="text"
+                    placeholder="Enter session ID"
+                    autocomplete="off"
+                    on:input=move |ev| {
+                        set_join_id.set(event_target_value(&ev));
+                    }
+                />
 
-                    <input
-                        type="text"
-                        placeholder="Enter session ID"
-                        autocomplete="off"
-                        prop:value=move || join_id.get()
-                        on:input=move |ev| {
-                            set_join_id.set(event_target_value(&ev));
-                        }
-                    />
-
-                    <button
-                        type="submit"
-                        class="join-button"
-                    >
-                        "Join Screen"
-                    </button>
-
-                </form>
+                <button
+                    type="button"
+                    class="join-button"
+                    on:click=join_session
+                >
+                    "Join Session"
+                </button>
 
             </section>
 
