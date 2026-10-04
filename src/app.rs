@@ -1,44 +1,45 @@
+use leptos::html::Input;
 use leptos::task::spawn_local;
 use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::logging::log;
-use leptos::html::Input;
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = invoke)]
+    async fn invoke_without_args(cmd: &str) -> JsValue;
+
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
     async fn invoke(cmd: &str, args: JsValue) -> JsValue;
 }
 
 #[derive(Serialize)]
 struct SessionArgs<'a> {
-    session_id: &'a str,
+    sessionId: &'a str,
 }
 
 #[derive(Serialize)]
 struct JoinSessionArgs<'a> {
-    session_id: &'a str,
+    sessionId: &'a str,
 }
 
 
 #[component]
 pub fn App() -> impl IntoView {
     let (session_id, set_session_id) = signal(String::new());
-    let (join_id, set_join_id) = signal(String::new());
+    let join_id: NodeRef<Input> = NodeRef::new();
+
     let (status, set_status) = signal(String::new());
     let (sharing, set_sharing) = signal(false);    
 
-    // Start sharing the screen
     let start_sharing = move |_| {
         spawn_local(async move {
-            let response = invoke(
-                "start_screen_share",
-                JsValue::NULL,
-            )
+            let response = invoke_without_args("start_screen_share")
             .await;
 
             if let Some(id) = response.as_string() {
+                log!("Started screen sharing session with ID: {}", id);
                 set_session_id.set(id.clone());
                 set_sharing.set(true);
                 set_status.set(format!("Your session ID is: {}", id));
@@ -48,30 +49,30 @@ pub fn App() -> impl IntoView {
         });
     };
 
-    let join_input: NodeRef<Input> = NodeRef::new();
-
-    // Join an existing screen share
     let join_session = move |ev: SubmitEvent| {
         ev.prevent_default();
         
-        let id = join_input
+        log::info!("Join session button clicked");
+        let input = join_id
             .get()
-            .expect("Join input should be available")
-            .value();
-        
+            .expect("Join input was not mounted");
+
+        let id = input.value();
+
         if id.trim().is_empty() {
-            set_status.set("Enter a session ID.".to_string());
+            set_status.set("Please enter a session ID.".to_string());
             return;
         }
 
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(
                 &JoinSessionArgs {
-                    session_id: &id,
+                    sessionId: &id,
                 }
             )
             .unwrap();
 
+            log!("Attempting to join session with ID: {}", id);
             let response = invoke("join_screen_share", args).await;
 
             if let Some(message) = response.as_string() {
@@ -156,28 +157,21 @@ pub fn App() -> impl IntoView {
 
             <section class="join-card">
                 <h2>"Join a screen share"</h2>
-
                 <p class="description">
                     "Enter the session ID provided by the person sharing their screen."
                 </p>
+                <form on:submit=join_session>
+                    <input
+                        node_ref=join_id
+                        type="text"
+                        placeholder="Enter session ID"
+                        autocomplete="off"
+                    />
 
-                <input  
-                    type="text"
-                    placeholder="Enter session ID"
-                    autocomplete="off"
-                    on:input=move |ev| {
-                        set_join_id.set(event_target_value(&ev));
-                    }
-                />
-
-                <button
-                    type="button"
-                    class="join-button"
-                    on:click=join_session
-                >
-                    "Join Session"
-                </button>
-
+                    <button type="submit" class="join-button">
+                        "Join Screen"
+                    </button>
+                </form>
             </section>
 
             {move || {
