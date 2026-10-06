@@ -1,10 +1,11 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use tauri_plugin_log::{log};
+use uuid::Uuid;
 
 #[tauri::command]
 fn start_screen_share() -> String {
     log::info!("Starting screen sharing session...");
-    "ABC123".to_string()
+    Uuid::new_v4().to_string()
 }
 
 #[tauri::command]

@@ -66,6 +66,21 @@ h2 {
     line-height: 1.5;
 }
 
+.active-session-button{
+    background: #4f7cff;
+    color: white;
+    font-size: 16px;
+    margin:5px;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.active-session-button:hover{
+    background: #3d6df0;
+}
+
 .share-button,
 .join-button {
     width: 100%;
@@ -121,7 +136,7 @@ input:focus {
 
 .session-box strong {
     display: block;
-    font-size: 24px;
+    font-size: 16px;
     letter-spacing: 2px;
     margin: 8px 0;
 }

@@ -4,6 +4,10 @@ use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use leptos::logging::log;
+use leptos_use::{
+    use_clipboard, UseClipboardReturn,
+};
+
 
 #[wasm_bindgen]
 extern "C" {
@@ -83,6 +87,13 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    let UseClipboardReturn { 
+        is_supported, 
+        text, 
+        copied, 
+        copy 
+    } = use_clipboard();
+
     view! {
         <main class="app">
 
@@ -142,6 +153,22 @@ pub fn App() -> impl IntoView {
                                 <p>
                                     "Send this ID to the person who wants to watch your screen."
                                 </p>
+                            </div>
+
+                            <div>
+                                <button class="active-session-button">
+                                    "Stop Sharing"
+                                </button>
+                                <button class="active-session-button" on:click={
+                                        let copy = copy.clone();
+                                        move |_| {
+                                            copy(&session_id.get());
+                                            //TODO: Span a message that says "Copied to clipboard" for 2 seconds
+                                        }}>
+                                    "Copy Session ID"
+                                </button>
+                                // TODO: Add a mini window to show the screen share in a small window
+                                
                             </div>
                         })
                     } else {
