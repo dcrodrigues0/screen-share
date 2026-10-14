@@ -15,6 +15,7 @@ console_error_panic_hook = "0.1.7"
 log = "0.4.34"
 leptos-use = "0.19.2"
 uuid = "1.27.0"
+webrtc = "0.21.0"
 
 [workspace]
-members = ["src-tauri"]
+members = ["signaling-server","src-tauri"]
