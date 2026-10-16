@@ -33,7 +33,7 @@ async fn main() {
     let firebase_client: Firebase = Firebase::new(&database_url).unwrap().at("offers");
     
     let offer = Offer {
-        sdp: String::from("sdp_value_test"),
+        sdp: String::from("sdp_value_test"), //session_description_protocol
         sdp_type: String::from("sdpt_type_value_test"),
     };
 

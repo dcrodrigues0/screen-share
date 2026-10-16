@@ -16,6 +16,18 @@ log = "0.4.34"
 leptos-use = "0.19.2"
 uuid = "1.27.0"
 webrtc = "0.21.0"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "Navigator",
+    "MediaDevices",
+    "MediaStreamConstraints",
+    "MediaStream",
+    "HtmlVideoElement"
+]
 
 [workspace]
 members = ["signaling-server","src-tauri"]

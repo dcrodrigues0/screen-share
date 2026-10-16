@@ -1,12 +1,16 @@
 use leptos::html::Input;
+use leptos::html::Video;
 use leptos::task::spawn_local;
 use leptos::{ev::SubmitEvent, prelude::*};
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 use leptos::logging::log;
 use leptos_use::{
     use_clipboard, UseClipboardReturn,
 };
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{DisplayMediaStreamConstraints, HtmlVideoElement, MediaStreamConstraints};
 
 
 #[wasm_bindgen]
@@ -35,13 +39,42 @@ pub fn App() -> impl IntoView {
     let join_id: NodeRef<Input> = NodeRef::new();
 
     let (status, set_status) = signal(String::new());
-    let (sharing, set_sharing) = signal(false);    
+    let (sharing, set_sharing) = signal(false);
+    
+    let (error_msg, set_error_msg) = signal(String::new());
+    let video_ref: NodeRef<leptos::html::Video> = NodeRef::new();
 
-    let start_sharing = move |_| {
-        spawn_local(async move {
-            let response = invoke_without_args("start_screen_share")
-            .await;
 
+    let start_share = Action::new(|_| async move {
+            let window = web_sys::window().expect("No global `window` exists");
+            let navigator = window.navigator();
+            let media_devices = navigator.media_devices().expect("No media devices available");
+
+            let mut constraints = DisplayMediaStreamConstraints::new();
+
+            constraints.set_video(&wasm_bindgen::JsValue::TRUE);
+            constraints.set_audio(&wasm_bindgen::JsValue::TRUE);
+
+            // Call getDisplayMedia
+            match media_devices.get_display_media_with_constraints(&constraints){
+                Ok(promise) =>{
+                    match JsFuture::from(promise).await {
+                        Ok(js_value) => {
+                            let media_stream = js_value.unchecked_into::<web_sys::MediaStream>();
+                            
+                            // Attach the stream to the video element
+                            if let Some(video_el) = video_ref.get() {
+                                let video_html: &HtmlVideoElement = video_el.unchecked_ref();
+                                video_html.set_src_object(Some(&media_stream));
+                            }
+                        },
+                        Err(e) => set_error_msg.set(format!("User denied access: {:?}", e)),
+                    }
+                },
+                Err(e) => set_error_msg.set(format!("API not supported:: {:?}", e)),
+            }
+            
+            /*
             if let Some(id) = response.as_string() {
                 log!("Started screen sharing session with ID: {}", id);
                 set_session_id.set(id.clone());
@@ -50,8 +83,8 @@ pub fn App() -> impl IntoView {
             } else {
                 set_status.set("Could not start screen sharing.".to_string());
             }
-        });
-    };
+             */
+    });
 
     let join_session = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -126,7 +159,7 @@ pub fn App() -> impl IntoView {
 
                 <button
                     class="share-button"
-                    on:click=start_sharing
+                    on:click=move |_| { start_share.dispatch(()); }
                     disabled=move || sharing.get()
                 >
                     {move || {
@@ -137,6 +170,14 @@ pub fn App() -> impl IntoView {
                         }
                     }}
                 </button>
+                <video 
+                    node_ref=video_ref 
+                    autoplay=true 
+                    playsinline=true 
+                    muted=true // Mute local playback to prevent audio feedback
+                    class="mt-4 border rounded shadow-lg w-full max-w-2xl"
+                >
+                </video>
 
                 {move || {
                     if !session_id.get().is_empty() {
