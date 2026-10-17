@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{DisplayMediaStreamConstraints, HtmlVideoElement, MediaStreamConstraints};
-
+use uuid::Uuid;
 
 #[wasm_bindgen]
 extern "C" {
@@ -41,50 +41,94 @@ pub fn App() -> impl IntoView {
     let (status, set_status) = signal(String::new());
     let (sharing, set_sharing) = signal(false);
     
-    let (error_msg, set_error_msg) = signal(String::new());
-    let video_ref: NodeRef<leptos::html::Video> = NodeRef::new();
+    let video_ref: NodeRef<Video> = NodeRef::new();
 
 
-    let start_share = Action::new(|_| async move {
-            let window = web_sys::window().expect("No global `window` exists");
-            let navigator = window.navigator();
-            let media_devices = navigator.media_devices().expect("No media devices available");
+    let start_share = move |_| {
+        let window = match web_sys::window() {
+            Some(window) => window,
+            None => {
+                set_status.set("Window API unavailable".to_string());
+                return;
+            }
+        };
 
-            let mut constraints = DisplayMediaStreamConstraints::new();
+        let secure = window.is_secure_context();
+        let navigator = window.navigator();
 
-            constraints.set_video(&wasm_bindgen::JsValue::TRUE);
-            constraints.set_audio(&wasm_bindgen::JsValue::TRUE);
+        let media_devices = match navigator.media_devices() {
+            Ok(devices) => devices,
+            Err(err) => {
+                set_status.set(format!(
+                    "MediaDevices unavailable: {:?}",
+                    err
+                ));
+                return;
+            }
+        };
 
-            // Call getDisplayMedia
-            match media_devices.get_display_media_with_constraints(&constraints){
-                Ok(promise) =>{
-                    match JsFuture::from(promise).await {
-                        Ok(js_value) => {
-                            let media_stream = js_value.unchecked_into::<web_sys::MediaStream>();
-                            
-                            // Attach the stream to the video element
-                            if let Some(video_el) = video_ref.get() {
-                                let video_html: &HtmlVideoElement = video_el.unchecked_ref();
-                                video_html.set_src_object(Some(&media_stream));
-                            }
-                        },
-                        Err(e) => set_error_msg.set(format!("User denied access: {:?}", e)),
+        log!("Secure context: {}", window.is_secure_context());
+
+        let mut constraints = DisplayMediaStreamConstraints::new();
+        constraints.set_video(&JsValue::TRUE);
+        constraints.set_audio(&JsValue::FALSE);
+
+        let promise = match media_devices
+            .get_display_media_with_constraints(&constraints)
+        {
+            Ok(promise) => promise,
+            Err(err) => {
+                set_status.set(format!(
+                    "getDisplayMedia call failed: {:?}",
+                    err
+                ));
+                return;
+            }
+        };
+
+        spawn_local(async move {
+            match JsFuture::from(promise).await {
+                Ok(value) => {
+                    let stream = value.unchecked_into::<web_sys::MediaStream>();
+
+                    if let Some(video) = video_ref.get() {
+                        let video: &HtmlVideoElement = video.unchecked_ref();
+                        video.set_src_object(Some(&stream));
+
+                        if let Err(err) = video.play() {
+                            log!("Video playback error: {:?}", err);
+                        }
                     }
-                },
-                Err(e) => set_error_msg.set(format!("API not supported:: {:?}", e)),
+
+                    let id = Uuid::new_v4().to_string();
+                    set_session_id.set(id.clone());
+                    set_sharing.set(true);
+                    set_status.set(format!("Your session ID is: {}", id));
+                }
+                Err(err) => {
+                    let name = js_sys::Reflect::get(
+                        &err,
+                        &JsValue::from_str("name"),
+                    )
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_else(|| "UnknownError".to_string());
+
+                    let message = js_sys::Reflect::get(
+                        &err,
+                        &JsValue::from_str("message"),
+                    )
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_else(|| format!("{:?}", err));
+
+                    let details = format!("{}: {}", name, message);
+                    log!("Screen capture failed: {}", details);
+                    set_status.set(details);
+                }
             }
-            
-            /*
-            if let Some(id) = response.as_string() {
-                log!("Started screen sharing session with ID: {}", id);
-                set_session_id.set(id.clone());
-                set_sharing.set(true);
-                set_status.set(format!("Your session ID is: {}", id));
-            } else {
-                set_status.set("Could not start screen sharing.".to_string());
-            }
-             */
-    });
+        });
+    };
 
     let join_session = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -159,7 +203,7 @@ pub fn App() -> impl IntoView {
 
                 <button
                     class="share-button"
-                    on:click=move |_| { start_share.dispatch(()); }
+                    on:click=start_share
                     disabled=move || sharing.get()
                 >
                     {move || {
@@ -170,12 +214,13 @@ pub fn App() -> impl IntoView {
                         }
                     }}
                 </button>
+                
                 <video 
                     node_ref=video_ref 
                     autoplay=true 
                     playsinline=true 
                     muted=true // Mute local playback to prevent audio feedback
-                    class="mt-4 border rounded shadow-lg w-full max-w-2xl"
+                    class="video-preview"
                 >
                 </video>
 

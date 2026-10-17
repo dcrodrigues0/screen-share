@@ -180,3 +180,9 @@ input:focus {
     text-align: center;
     font-size: 14px;
 }
+
+.video-preview{
+    margin:20px;
+    background: #11151d;
+    border-radius: 5%;
+}
