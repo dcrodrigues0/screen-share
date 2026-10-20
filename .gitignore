@@ -1,3 +1,5 @@
 /dist/
 /target/
 /Cargo.lock
+/nsis*
+signaling-server/src/.env

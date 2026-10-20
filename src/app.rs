@@ -74,8 +74,7 @@ pub fn App() -> impl IntoView {
         constraints.set_audio(&JsValue::FALSE);
 
         let promise = match media_devices
-            .get_display_media_with_constraints(&constraints)
-        {
+            .get_display_media_with_constraints(&constraints){
             Ok(promise) => promise,
             Err(err) => {
                 set_status.set(format!(
@@ -219,7 +218,9 @@ pub fn App() -> impl IntoView {
                     node_ref=video_ref 
                     autoplay=true 
                     playsinline=true 
-                    muted=true // Mute local playback to prevent audio feedback
+                    muted=false 
+                    width="340" 
+                    height="220"
                     class="video-preview"
                 >
                 </video>
