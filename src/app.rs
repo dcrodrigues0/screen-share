@@ -43,6 +43,13 @@ pub fn App() -> impl IntoView {
     
     let video_ref: NodeRef<Video> = NodeRef::new();
 
+    let stop_share = move |_| {
+        if let Some(video) = video_ref.get(){
+            let stream = video.src_object();
+            //TODO Pattern matching and test get mediastream tracks and stop track
+            
+        }
+    }
 
     let start_share = move |_| {
         let window = match web_sys::window() {
@@ -69,9 +76,9 @@ pub fn App() -> impl IntoView {
 
         log!("Secure context: {}", window.is_secure_context());
 
-        let mut constraints = DisplayMediaStreamConstraints::new();
+        let constraints = DisplayMediaStreamConstraints::new();
         constraints.set_video(&JsValue::TRUE);
-        constraints.set_audio(&JsValue::FALSE);
+        constraints.set_audio(&JsValue::TRUE);
 
         let promise = match media_devices
             .get_display_media_with_constraints(&constraints){
@@ -88,7 +95,7 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             match JsFuture::from(promise).await {
                 Ok(value) => {
-                    let stream = value.unchecked_into::<web_sys::MediaStream>();
+                    let stream: web_sys::MediaStream = value.unchecked_into::<web_sys::MediaStream>();
 
                     if let Some(video) = video_ref.get() {
                         let video: &HtmlVideoElement = video.unchecked_ref();
@@ -97,12 +104,12 @@ pub fn App() -> impl IntoView {
                         if let Err(err) = video.play() {
                             log!("Video playback error: {:?}", err);
                         }
-                    }
 
-                    let id = Uuid::new_v4().to_string();
-                    set_session_id.set(id.clone());
-                    set_sharing.set(true);
-                    set_status.set(format!("Your session ID is: {}", id));
+                        let id = Uuid::new_v4().to_string();
+                        set_session_id.set(id.clone());
+                        set_sharing.set(true);
+                        set_status.set(format!("Your session ID is: {}", id));
+                    }
                 }
                 Err(err) => {
                     let name = js_sys::Reflect::get(
