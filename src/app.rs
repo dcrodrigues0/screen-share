@@ -45,11 +45,22 @@ pub fn App() -> impl IntoView {
 
     let stop_share = move |_| {
         if let Some(video) = video_ref.get(){
-            let stream = video.src_object();
-            //TODO Pattern matching and test get mediastream tracks and stop track
+            let ss: Option<web_sys::MediaStream> = video.src_object();
+            match ss {
+                Some(stream) => {
+                    stream.get_tracks().for_each(&mut |track,_,_|{
+                        if let Ok(track) = track.dyn_into::<web_sys::MediaStreamTrack>() {
+                            track.stop();
+                        }
+                    });
+                }
+                None => {
+                    set_status.set("Cannot close screen share".to_string());
+                },
+            }
             
         }
-    }
+    };
 
     let start_share = move |_| {
         let window = match web_sys::window() {
@@ -250,7 +261,9 @@ pub fn App() -> impl IntoView {
                             </div>
 
                             <div>
-                                <button class="active-session-button">
+                                <button 
+                                    class="active-session-button"
+                                    on:click=stop_share>
                                     "Stop Sharing"
                                 </button>
                                 <button class="active-session-button" on:click={
