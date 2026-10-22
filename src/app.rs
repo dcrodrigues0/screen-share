@@ -51,6 +51,9 @@ pub fn App() -> impl IntoView {
                     stream.get_tracks().for_each(&mut |track,_,_|{
                         if let Ok(track) = track.dyn_into::<web_sys::MediaStreamTrack>() {
                             track.stop();
+                            video.set_src_object(None);
+                            set_sharing.set(false);
+                            set_status.set("Session closed".to_string());
                         }
                     });
                 }
@@ -58,7 +61,6 @@ pub fn App() -> impl IntoView {
                     set_status.set("Cannot close screen share".to_string());
                 },
             }
-            
         }
     };
 
@@ -232,8 +234,9 @@ pub fn App() -> impl IntoView {
                     }}
                 </button>
                 
+
                 <video 
-                    node_ref=video_ref 
+                    node_ref=video_ref
                     autoplay=true 
                     playsinline=true 
                     muted=false 
@@ -241,10 +244,11 @@ pub fn App() -> impl IntoView {
                     height="220"
                     class="video-preview"
                 >
-                </video>
+                </video> 
+                
 
                 {move || {
-                    if !session_id.get().is_empty() {
+                    if sharing.get() {
                         Some(view! {
                             <div class="session-box">
                                 <span class="session-label">
