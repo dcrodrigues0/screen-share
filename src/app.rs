@@ -270,16 +270,26 @@ pub fn App() -> impl IntoView {
                                     on:click=stop_share>
                                     "Stop Sharing"
                                 </button>
-                                <button class="active-session-button" on:click={
+                                <button 
+                                    class="active-session-button" 
+                                    on:click={
                                         let copy = copy.clone();
                                         move |_| {
                                             copy(&session_id.get());
-                                            //TODO: Span a message that says "Copied to clipboard" for 2 seconds
                                         }}>
                                     "Copy Session ID"
                                 </button>
-                                // TODO: Add a mini window to show the screen share in a small window
-                                
+                                {move || {
+                                    if copied.get() {
+                                        Some(view! {
+                                            <span class="copy-confirmation">
+                                                "Session ID Copied"
+                                            </span>
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }}
                             </div>
                         })
                     } else {

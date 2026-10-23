@@ -81,6 +81,12 @@ h2 {
     background: #3d6df0;
 }
 
+.copy-confirmation {
+    display: block;
+    color: #4caf83;
+    font-size: 12px;
+}
+
 .share-button,
 .join-button {
     width: 100%;
