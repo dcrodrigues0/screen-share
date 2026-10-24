@@ -11,6 +11,7 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
+serde_json = "1.0.151"
 console_error_panic_hook = "0.1.7"
 log = "0.4.34"
 leptos-use = "0.19.2"
@@ -24,7 +25,20 @@ features = [
     "MediaDevices",
     "MediaStreamConstraints",
     "MediaStream",
-    "HtmlVideoElement"
+    "HtmlVideoElement",
+    "RtcPeerConnection",
+    "RtcSessionDescriptionInit",
+    "RtcConfiguration",
+    "RtcIceServer",
+    "RtcPeerConnectionIceEvent",
+    "RtcTrackEvent",
+    "RtcIceConnectionState",
+    "RtcIceCandidate",
+    "RtcIceCandidateInit",
+    "RtcSdpType",
+    "MessageEvent",
+    "Event",
+    "WebSocket"
 ]
 
 [workspace]
