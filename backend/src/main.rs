@@ -39,7 +39,8 @@ struct SignalMessage {
 
 #[tokio::main]
 async fn main() {
-    let address = env::var("SIGNALING_ADDR").unwrap_or_else(|_| "0.0.0.0:9001".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "9001".to_string());
+    let address = format!("0.0.0.0:{port}");
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
     let app = Router::new()
         .route("/", get(websocket_handler))

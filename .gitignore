@@ -1,4 +1,6 @@
-/dist/
 /target/
-/Cargo.lock
-/nsis*
+/frontend/target/
+/backend/target/
+/frontend/Cargo.lock
+/frontend/dist/
+/frontend/nsis*

@@ -19,7 +19,10 @@ use uuid::Uuid;
 
 // The signaling service should route messages by session_id and relay them to
 // every other socket in that room. Keep this configurable for deployment.
-const SIGNALING_WS_URL: &str = "ws://127.0.0.1:9001";
+const SIGNALING_WS_URL: &str = match option_env!("SIGNALING_WS_URL") {
+    Some(url) => url,
+    None => "ws://127.0.0.1:9001",
+};
 
 thread_local! {
     static ACTIVE_PEER: RefCell<Option<RtcPeerConnection>> = const { RefCell::new(None) };

@@ -41,5 +41,3 @@ features = [
     "WebSocket"
 ]
 
-[workspace]
-members = ["signaling-server","src-tauri"]
