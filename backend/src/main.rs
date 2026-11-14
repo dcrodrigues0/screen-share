@@ -20,6 +20,7 @@ type Outgoing = mpsc::UnboundedSender<Message>;
 struct Room {
     peers: Vec<Outgoing>,
     offer: Option<String>,
+    host_ice_candidates: Vec<SignalMessage>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -117,6 +118,7 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                     Room {
                         peers: vec![outgoing.clone()],
                         offer: None,
+                        host_ice_candidates: Vec::new(),
                     },
                 );
                 joined_rooms.push(message.session_id);
@@ -144,6 +146,9 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                         };
                         send_message(&outgoing, &offer);
                     }
+                    for candidate in &room.host_ice_candidates {
+                        send_message(&outgoing, candidate);
+                    }
                 } else {
                     send_error(&outgoing, "Session not found", Some(&message.session_id));
                 }
@@ -161,6 +166,10 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                     }
                     if message.kind == "offer" {
                         room.offer = message.sdp.clone();
+                    } else if message.kind == "ice-candidate"
+                        && room.peers.first().is_some_and(|host| host.same_channel(&outgoing))
+                    {
+                        room.host_ice_candidates.push(message.clone());
                     }
                     room.peers.retain(|peer| {
                         if peer.same_channel(&outgoing) {
