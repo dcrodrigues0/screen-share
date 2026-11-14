@@ -35,7 +35,14 @@ jobs:
 
       - name: Build Windows installer
         working-directory: frontend
-        run: cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
+        env:
+          SIGNALING_WS_URL: ${{ secrets.SIGNALING_WS_URL }}
+        run: |
+          if [ -z "$SIGNALING_WS_URL" ]; then
+            echo "Set SIGNALING_WS_URL as a GitHub Actions variable in the gcp environment."
+            exit 1
+          fi
+          cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
 
       - id: auth
         uses: google-github-actions/auth@v2
@@ -48,7 +55,7 @@ jobs:
 
       - name: Upload installer to Cloud Storage
         env:
-          FRONTEND_BUCKET: ${{ vars.GCP_FRONTEND_BUCKET }}
+          FRONTEND_BUCKET: ${{ secrets.GCP_FRONTEND_BUCKET }}
         run: |
           if [ -z "$FRONTEND_BUCKET" ]; then
             echo "Set the GCP_FRONTEND_BUCKET repository variable."
