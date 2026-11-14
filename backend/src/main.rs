@@ -60,7 +60,7 @@ async fn websocket_handler(ws: WebSocketUpgrade, State(rooms): State<Rooms>) -> 
     ws.on_upgrade(move |socket| handle_socket(socket, rooms))
 }
 
-// TODO Support multiple rooms and multiple peers per room.
+// TODO Support multiple rooms and multiple peers per room. 
 async fn handle_socket(socket: WebSocket, rooms: Rooms) {
     let (mut socket_sender, mut socket_receiver) = socket.split();
     let (outgoing, mut outgoing_receiver) = mpsc::unbounded_channel::<Message>();
