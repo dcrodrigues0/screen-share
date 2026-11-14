@@ -84,6 +84,9 @@ pub fn App() -> impl IntoView {
     let remote_video_ref: NodeRef<Video> = NodeRef::new();
 
     let start_share = move |_| {
+        // Diagnostics belong to the current attempt, not the previous session.
+        set_diagnostics.set(Vec::new());
+        set_status.set(String::new());
         let window = match web_sys::window() {
             Some(window) => window,
             None => {
@@ -341,8 +344,23 @@ pub fn App() -> impl IntoView {
                     .and_then(|v| v.as_string())
                     .unwrap_or_else(|| format!("{:?}", err));
 
-                    let details = format!("{}: {}", name, message);
+                    let details = if name == "NotReadableError"
+                        && message.to_lowercase().contains("audio")
+                    {
+                        format!(
+                            "{}: {}. The selected window's audio could not be captured. Try sharing a browser tab or the entire screen, and enable the audio option in the share picker.",
+                            name, message
+                        )
+                    } else {
+                        format!("{}: {}", name, message)
+                    };
                     log!("Screen capture failed: {}", details);
+                    set_diagnostics.update(|entries| {
+                        entries.push(format!(
+                            "ERROR: Screen capture rejected; exception={} ; message={}",
+                            name, message
+                        ));
+                    });
                     set_status.set(details);
                 }
             }
@@ -379,7 +397,10 @@ pub fn App() -> impl IntoView {
 
     let join_session = move |ev: SubmitEvent| {
         ev.prevent_default();
-        
+        // Clear stale diagnostics as soon as a new join is attempted, even if
+        // validation or peer setup fails.
+        set_diagnostics.set(Vec::new());
+        set_status.set(String::new());
         log::info!("Join session button clicked");
         let input = join_id
             .get()
@@ -584,7 +605,9 @@ pub fn App() -> impl IntoView {
             if let Some(video) = remote_video.get() {
                 let video: &HtmlVideoElement = video.unchecked_ref();
                 video.set_src_object(Some(&stream));
-                video.set_muted(true);
+                // Keep remote audio enabled so the viewer's player controls
+                // can control the shared system audio.
+                video.set_muted(false);
                 video.set_autoplay(true);
                 video.set_attribute("playsinline", "true").ok();
                 for event_name in ["loadedmetadata", "playing", "waiting", "stalled", "error"] {
