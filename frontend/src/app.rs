@@ -17,12 +17,8 @@ use web_sys::{
 };
 use uuid::Uuid;
 
-// The signaling service should route messages by session_id and relay them to
-// every other socket in that room. Keep this configurable for deployment.
-const SIGNALING_WS_URL: &str = match option_env!("SIGNALING_WS_URL") {
-    Some(url) => url,
-    None => "ws://127.0.0.1:9001",
-};
+// Read from frontend/.env at compile time.
+const SIGNALING_WS_URL: &str = dotenvy_macro::dotenv!("SIGNALING_WS_URL");
 
 thread_local! {
     static ACTIVE_PEER: RefCell<Option<RtcPeerConnection>> = const { RefCell::new(None) };
@@ -42,6 +38,8 @@ struct SignalMessage {
     sdp_mid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sdp_m_line_index: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    participant_count: Option<usize>,
 }
 
 fn send_signal(socket: &WebSocket, message: &SignalMessage) -> Result<(), JsValue> {
@@ -78,6 +76,7 @@ pub fn App() -> impl IntoView {
     let (status, set_status) = signal(String::new());
     let (sharing, set_sharing) = signal(false);
     let (watching, set_watching) = signal(false);
+    let (participant_count, set_participant_count) = signal(1usize);
     
     let video_ref: NodeRef<Video> = NodeRef::new();
     let remote_video_ref: NodeRef<Video> = NodeRef::new();
@@ -150,7 +149,13 @@ pub fn App() -> impl IntoView {
                             return;
                         }
                     };
-                    peer.add_stream(&stream);
+                    // `addStream` is deprecated and has inconsistent support in
+                    // WebView2. Add each captured track through the modern API.
+                    stream.get_tracks().for_each(&mut |track, _, _| {
+                        if let Ok(track) = track.dyn_into::<web_sys::MediaStreamTrack>() {
+                            peer.add_track_0(&track, &stream);
+                        }
+                    });
 
                     let socket = match WebSocket::new(SIGNALING_WS_URL) {
                         Ok(socket) => socket,
@@ -173,6 +178,7 @@ pub fn App() -> impl IntoView {
                                 candidate: Some(candidate.candidate()),
                                 sdp_mid: candidate.sdp_mid(),
                                 sdp_m_line_index: candidate.sdp_m_line_index(),
+                                participant_count: None,
                                 sdp: None,
                             };
                             if ice_socket.ready_state() == WebSocket::OPEN {
@@ -201,6 +207,7 @@ pub fn App() -> impl IntoView {
                                     candidate: None,
                                     sdp_mid: None,
                                     sdp_m_line_index: None,
+                                    participant_count: None,
                                 })?;
                                 let offer_value = JsFuture::from(peer.create_offer()).await?;
                                 let offer: RtcSessionDescriptionInit = offer_value.unchecked_into();
@@ -213,6 +220,7 @@ pub fn App() -> impl IntoView {
                                     candidate: None,
                                     sdp_mid: None,
                                     sdp_m_line_index: None,
+                                    participant_count: None,
                                 })?;
                                 Ok::<(), JsValue>(())
                             }.await;
@@ -232,6 +240,11 @@ pub fn App() -> impl IntoView {
                         if message.session_id != message_session { return; }
                         let peer = message_peer.clone();
                         match message.kind.as_str() {
+                            "participants" => {
+                                if let Some(count) = message.participant_count {
+                                    set_participant_count.set(count);
+                                }
+                            }
                             "answer" => {
                                 if let Some(sdp) = message.sdp {
                                     spawn_local(async move {
@@ -276,6 +289,7 @@ pub fn App() -> impl IntoView {
                         log!("Video playback error: {:?}", err);
                     }
                     set_session_id.set(id.clone());
+                    set_participant_count.set(1);
                     set_sharing.set(true);
                     set_status.set(format!("Starting share session {}…", id));
                 }
@@ -328,6 +342,7 @@ pub fn App() -> impl IntoView {
         }
         set_watching.set(false);
         set_sharing.set(false);
+        set_participant_count.set(1);
         set_status.set("Session closed".to_string());
     };
 
@@ -373,6 +388,7 @@ pub fn App() -> impl IntoView {
                 candidate: Some(candidate.candidate()),
                 sdp_mid: candidate.sdp_mid(),
                 sdp_m_line_index: candidate.sdp_m_line_index(),
+                participant_count: None,
                 sdp: None,
             });
             if let Err(error) = result { log!("Could not send ICE candidate: {:?}", error); }
@@ -391,6 +407,7 @@ pub fn App() -> impl IntoView {
                 candidate: None,
                 sdp_mid: None,
                 sdp_m_line_index: None,
+                participant_count: None,
             }) {
                 log!("Could not join signaling room: {:?}", error);
                 open_status.set("Could not send the join request. Please try again.".to_string());
@@ -425,6 +442,11 @@ pub fn App() -> impl IntoView {
             let peer = incoming_peer.clone();
             let socket = incoming_socket.clone();
             match message.kind.as_str() {
+                "participants" => {
+                    if let Some(count) = message.participant_count {
+                        set_participant_count.set(count);
+                    }
+                }
                 "offer" => {
                     let Some(sdp) = message.sdp else { return; };
                     let session = incoming_session.clone();
@@ -443,6 +465,7 @@ pub fn App() -> impl IntoView {
                                 candidate: None,
                                 sdp_mid: None,
                                 sdp_m_line_index: None,
+                                participant_count: None,
                             })?;
                             Ok::<(), JsValue>(())
                         }.await;
@@ -475,10 +498,22 @@ pub fn App() -> impl IntoView {
         let track_session = id.clone();
         let remote_video = remote_video_ref;
         let on_track = Closure::<dyn FnMut(RtcTrackEvent)>::new(move |event: RtcTrackEvent| {
-            let Some(stream) = event.streams().get(0).dyn_into::<web_sys::MediaStream>().ok() else { return; };
+            let stream = event.streams().get(0).dyn_into::<web_sys::MediaStream>().ok()
+                .or_else(|| {
+                    let stream = web_sys::MediaStream::new().ok()?;
+                    stream.add_track(&event.track());
+                    Some(stream)
+                });
+            let Some(stream) = stream else {
+                track_status.set("Connected, but the remote video track is unavailable.".to_string());
+                return;
+            };
             if let Some(video) = remote_video.get() {
                 let video: &HtmlVideoElement = video.unchecked_ref();
                 video.set_src_object(Some(&stream));
+                video.set_muted(true);
+                video.set_autoplay(true);
+                video.set_attribute("playsinline", "true").ok();
                 match video.play() {
                     Ok(_) => track_status.set(format!("Connected to session {}", track_session)),
                     Err(error) => {
@@ -532,7 +567,7 @@ pub fn App() -> impl IntoView {
             <section class="share-card">
 
                 <div class="share-icon">
-                    "👻"
+                    <img src="/public/cat-knight.svg" alt="Kitten knight holding a sword" />
                 </div>
 
                 <h2>
@@ -590,6 +625,9 @@ pub fn App() -> impl IntoView {
 
                                 <p>
                                     "Send this ID to the person who wants to watch your screen."
+                                </p>
+                                <p class="participant-count">
+                                    {move || format!("{} connected", participant_count.get())}
                                 </p>
                             </div>
 

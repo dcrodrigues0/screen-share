@@ -53,8 +53,14 @@ input {
 }
 
 .share-icon {
-    font-size: 42px;
     margin-bottom: 12px;
+}
+
+.share-icon img {
+    display: block;
+    width: 72px;
+    height: 72px;
+    margin: 0 auto;
 }
 
 h2 {

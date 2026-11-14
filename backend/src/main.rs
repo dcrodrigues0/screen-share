@@ -35,6 +35,8 @@ struct SignalMessage {
     sdp_mid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sdp_m_line_index: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    participant_count: Option<usize>,
 }
 
 #[tokio::main]
@@ -118,6 +120,9 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                     },
                 );
                 joined_rooms.push(message.session_id);
+                if let Some(room) = rooms.get(joined_rooms.last().unwrap()) {
+                    broadcast_participant_count(room, joined_rooms.last().unwrap());
+                }
             }
             "join" => {
                 let mut rooms = rooms.lock().await;
@@ -126,6 +131,7 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                         room.peers.push(outgoing.clone());
                         joined_rooms.push(message.session_id.clone());
                     }
+                    broadcast_participant_count(room, &message.session_id);
                     if let Some(sdp) = room.offer.as_ref() {
                         let offer = SignalMessage {
                             kind: "offer".into(),
@@ -134,6 +140,7 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
                             candidate: None,
                             sdp_mid: None,
                             sdp_m_line_index: None,
+                            participant_count: None,
                         };
                         send_message(&outgoing, &offer);
                     }
@@ -182,7 +189,11 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
         for session_id in joined_rooms {
             let remove_room = if let Some(room) = rooms.get_mut(&session_id) {
                 room.peers.retain(|peer| !peer.same_channel(&outgoing));
-                room.peers.is_empty()
+                let empty = room.peers.is_empty();
+                if !empty {
+                    broadcast_participant_count(room, &session_id);
+                }
+                empty
             } else {
                 false
             };
@@ -193,6 +204,23 @@ async fn handle_socket(socket: WebSocket, rooms: Rooms) {
     }
     drop(outgoing);
     send_task.abort();
+}
+
+fn broadcast_participant_count(room: &Room, session_id: &str) {
+    let message = SignalMessage {
+        kind: "participants".into(),
+        session_id: session_id.to_string(),
+        sdp: None,
+        candidate: None,
+        sdp_mid: None,
+        sdp_m_line_index: None,
+        participant_count: Some(room.peers.len()),
+    };
+    if let Ok(payload) = serde_json::to_string(&message) {
+        for peer in &room.peers {
+            let _ = peer.send(Message::Text(payload.clone().into()));
+        }
+    }
 }
 
 fn send_message(sender: &Outgoing, message: &SignalMessage) {
@@ -211,6 +239,7 @@ fn send_error(sender: &Outgoing, reason: &str, session_id: Option<&str>) {
             candidate: None,
             sdp_mid: None,
             sdp_m_line_index: None,
+            participant_count: None,
         },
     );
 }

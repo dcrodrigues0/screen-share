@@ -16,6 +16,7 @@ console_error_panic_hook = "0.1.7"
 log = "0.4.34"
 leptos-use = "0.19.2"
 uuid = {version = "1.27.0", features = ["v4", "js"] }
+dotenvy_macro = "0.15.7"
 
 [dependencies.web-sys]
 version = "0.3"
@@ -25,8 +26,10 @@ features = [
     "MediaDevices",
     "MediaStreamConstraints",
     "MediaStream",
+    "MediaStreamTrack",
     "HtmlVideoElement",
     "RtcPeerConnection",
+    "RtcRtpSender",
     "RtcSessionDescriptionInit",
     "RtcConfiguration",
     "RtcIceServer",
