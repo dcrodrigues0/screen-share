@@ -41,6 +41,7 @@ features = [
     "RtcSdpType",
     "MessageEvent",
     "Event",
+    "EventTarget",
     "WebSocket"
 ]
 

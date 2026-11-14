@@ -5,7 +5,8 @@ use leptos::{ev::SubmitEvent, prelude::*};
 use leptos::logging::log;
 use leptos_use::{use_clipboard, UseClipboardReturn};
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -74,6 +75,7 @@ pub fn App() -> impl IntoView {
     let join_id: NodeRef<Input> = NodeRef::new();
 
     let (status, set_status) = signal(String::new());
+    let (diagnostics, set_diagnostics) = signal(Vec::<String>::new());
     let (sharing, set_sharing) = signal(false);
     let (watching, set_watching) = signal(false);
     let (participant_count, set_participant_count) = signal(1usize);
@@ -149,6 +151,8 @@ pub fn App() -> impl IntoView {
                             return;
                         }
                     };
+                    let remote_description_ready = Rc::new(Cell::new(false));
+                    let pending_ice = Rc::new(RefCell::new(Vec::<RtcIceCandidateInit>::new()));
                     // `addStream` is deprecated and has inconsistent support in
                     // WebView2. Add each captured track through the modern API.
                     stream.get_tracks().for_each(&mut |track, _, _| {
@@ -169,9 +173,11 @@ pub fn App() -> impl IntoView {
 
                     let ice_socket = socket.clone();
                     let ice_session = id.clone();
+                    let ice_diagnostics = set_diagnostics;
                     let on_ice = Closure::<dyn FnMut(RtcPeerConnectionIceEvent)>::new(
                         move |event: RtcPeerConnectionIceEvent| {
                             let Some(candidate) = event.candidate() else { return; };
+                            ice_diagnostics.update(|entries| entries.push("Local ICE candidate gathered".into()));
                             let message = SignalMessage {
                                 kind: "ice-candidate".to_string(),
                                 session_id: ice_session.clone(),
@@ -234,6 +240,9 @@ pub fn App() -> impl IntoView {
 
                     let message_peer = peer.clone();
                     let message_session = id.clone();
+                    let share_diagnostics = set_diagnostics;
+                    let remote_description_ready_for_messages = remote_description_ready.clone();
+                    let pending_ice_for_messages = pending_ice.clone();
                     let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
                         let Some(payload) = event.data().as_string() else { return; };
                         let Ok(message) = serde_json::from_str::<SignalMessage>(&payload) else { return; };
@@ -242,16 +251,32 @@ pub fn App() -> impl IntoView {
                         match message.kind.as_str() {
                             "participants" => {
                                 if let Some(count) = message.participant_count {
+                                    share_diagnostics.update(|entries| entries.push(format!("Server reports {} participant(s) in this session", count)));
                                     set_participant_count.set(count);
                                 }
                             }
                             "answer" => {
                                 if let Some(sdp) = message.sdp {
+                                    share_diagnostics.update(|entries| entries.push("Received viewer answer".into()));
+                                    let ready = remote_description_ready_for_messages.clone();
+                                    let pending = pending_ice_for_messages.clone();
                                     spawn_local(async move {
                                         let answer = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
                                         answer.set_sdp(&sdp);
-                                        if let Err(error) = JsFuture::from(peer.set_remote_description(&answer)).await {
-                                            log!("Could not apply remote answer: {:?}", error);
+                                        match JsFuture::from(peer.set_remote_description(&answer)).await {
+                                            Ok(_) => {
+                                                ready.set(true);
+                                                let candidates = std::mem::take(&mut *pending.borrow_mut());
+                                                for candidate in candidates {
+                                                    match web_sys::RtcIceCandidate::new(&candidate) {
+                                                        Ok(candidate) => if let Err(error) = JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await {
+                                                            log!("Could not apply queued remote ICE candidate: {:?}", error);
+                                                        },
+                                                        Err(error) => log!("Invalid queued remote ICE candidate: {:?}", error),
+                                                    }
+                                                }
+                                            }
+                                            Err(error) => log!("Could not apply remote answer: {:?}", error),
                                         }
                                     });
                                 }
@@ -261,19 +286,25 @@ pub fn App() -> impl IntoView {
                                     let init = RtcIceCandidateInit::new(&candidate);
                                     if let Some(mid) = message.sdp_mid.as_deref() { init.set_sdp_mid(Some(mid)); }
                                     if let Some(index) = message.sdp_m_line_index { init.set_sdp_m_line_index(Some(index)); }
-                                    spawn_local(async move {
-                                        match web_sys::RtcIceCandidate::new(&init) {
-                                            Ok(candidate) => {
-                                                if let Err(error) = JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await {
+                                    if remote_description_ready_for_messages.get() {
+                                        spawn_local(async move {
+                                            match web_sys::RtcIceCandidate::new(&init) {
+                                                Ok(candidate) => if let Err(error) = JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await {
                                                     log!("Could not apply remote ICE candidate: {:?}", error);
-                                                }
+                                                    share_diagnostics.update(|entries| entries.push(format!("ERROR: Applying remote ICE candidate failed: {:?}", error)));
+                                                },
+                                                Err(error) => log!("Invalid remote ICE candidate: {:?}", error),
                                             }
-                                            Err(error) => log!("Invalid remote ICE candidate: {:?}", error),
-                                        }
-                                    });
+                                        });
+                                    } else {
+                                        pending_ice_for_messages.borrow_mut().push(init);
+                                    }
                                 }
                             }
-                            "error" => log!("Signaling server reported an error"),
+                            "error" => {
+                                let reason = message.sdp.unwrap_or_else(|| "Unknown signaling error".into());
+                                share_diagnostics.update(|entries| entries.push(format!("ERROR: Signaling server: {}", reason)));
+                            },
                             _ => {}
                         }
                     });
@@ -360,18 +391,23 @@ pub fn App() -> impl IntoView {
             set_status.set("Please enter a session ID.".to_string());
             return;
         }
+        set_diagnostics.set(vec![format!("Joining session {}", id)]);
 
         let peer = match create_peer_connection() {
             Ok(peer) => peer,
             Err(error) => {
+                set_diagnostics.update(|entries| entries.push(format!("ERROR: Could not create WebRTC peer: {:?}", error)));
                 set_status.set(format!("Could not create WebRTC peer: {:?}", error));
                 return;
             }
         };
+        let remote_description_ready = Rc::new(Cell::new(false));
+        let pending_ice = Rc::new(RefCell::new(Vec::<RtcIceCandidateInit>::new()));
         let socket = match WebSocket::new(SIGNALING_WS_URL) {
             Ok(socket) => socket,
             Err(error) => {
                 peer.close();
+                set_diagnostics.update(|entries| entries.push(format!("ERROR: Could not open signaling WebSocket: {:?}", error)));
                 set_status.set(format!("Could not connect to signaling server: {:?}", error));
                 return;
             }
@@ -399,7 +435,9 @@ pub fn App() -> impl IntoView {
         let join_socket = socket.clone();
         let join_session = id.clone();
         let open_status = set_status;
+        let open_diagnostics = set_diagnostics;
         let on_open = Closure::<dyn FnMut()>::new(move || {
+            open_diagnostics.update(|entries| entries.push("Signaling WebSocket opened".into()));
             if let Err(error) = send_signal(&join_socket, &SignalMessage {
                 kind: "join".into(),
                 session_id: join_session.clone(),
@@ -410,8 +448,10 @@ pub fn App() -> impl IntoView {
                 participant_count: None,
             }) {
                 log!("Could not join signaling room: {:?}", error);
+                open_diagnostics.update(|entries| entries.push(format!("ERROR: Could not send join request: {:?}", error)));
                 open_status.set("Could not send the join request. Please try again.".to_string());
             } else {
+                open_diagnostics.update(|entries| entries.push("Join request sent".into()));
                 open_status.set("Request sent. Waiting for the screen sharer…".to_string());
             }
         });
@@ -419,14 +459,18 @@ pub fn App() -> impl IntoView {
         on_open.forget();
 
         let socket_error_status = set_status;
+        let socket_error_diagnostics = set_diagnostics;
         let on_socket_error = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+            socket_error_diagnostics.update(|entries| entries.push("ERROR: Signaling WebSocket error".into()));
             socket_error_status.set("Could not reach the signaling server. Check your connection and try again.".to_string());
         });
         socket.set_onerror(Some(on_socket_error.as_ref().unchecked_ref()));
         on_socket_error.forget();
 
         let socket_close_status = set_status;
+        let socket_close_diagnostics = set_diagnostics;
         let on_socket_close = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+            socket_close_diagnostics.update(|entries| entries.push("Signaling WebSocket closed".into()));
             socket_close_status.set("The signaling connection closed. You can leave and try again.".to_string());
         });
         socket.set_onclose(Some(on_socket_close.as_ref().unchecked_ref()));
@@ -435,26 +479,39 @@ pub fn App() -> impl IntoView {
         let incoming_peer = peer.clone();
         let incoming_socket = socket.clone();
         let incoming_session = id.clone();
+        let message_diagnostics = set_diagnostics;
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let Some(payload) = event.data().as_string() else { return; };
             let Ok(message) = serde_json::from_str::<SignalMessage>(&payload) else { return; };
             if message.session_id != incoming_session { return; }
+            let kind = message.kind.clone();
+            message_diagnostics.update(|entries| entries.push(format!("Signaling message: {}", kind)));
             let peer = incoming_peer.clone();
             let socket = incoming_socket.clone();
             match message.kind.as_str() {
                 "participants" => {
                     if let Some(count) = message.participant_count {
+                        message_diagnostics.update(|entries| entries.push(format!("Server reports {} participant(s)", count)));
                         set_participant_count.set(count);
                     }
                 }
                 "offer" => {
                     let Some(sdp) = message.sdp else { return; };
+                    message_diagnostics.update(|entries| entries.push("Received offer; applying remote description".into()));
                     let session = incoming_session.clone();
+                    let ready = remote_description_ready.clone();
+                    let pending = pending_ice.clone();
                     spawn_local(async move {
                     let offer = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
                         offer.set_sdp(&sdp);
                         let result = async {
                             JsFuture::from(peer.set_remote_description(&offer)).await?;
+                            ready.set(true);
+                            let candidates = std::mem::take(&mut *pending.borrow_mut());
+                            for candidate in candidates {
+                                let candidate = web_sys::RtcIceCandidate::new(&candidate)?;
+                                JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await?;
+                            }
                             let answer_value = JsFuture::from(peer.create_answer()).await?;
                             let answer: RtcSessionDescriptionInit = answer_value.unchecked_into();
                             JsFuture::from(peer.set_local_description(&answer)).await?;
@@ -469,25 +526,38 @@ pub fn App() -> impl IntoView {
                             })?;
                             Ok::<(), JsValue>(())
                         }.await;
-                        if let Err(error) = result { log!("Could not create/send WebRTC answer: {:?}", error); }
+                        if let Err(error) = result {
+                            log!("Could not create/send WebRTC answer: {:?}", error);
+                            message_diagnostics.update(|entries| entries.push(format!("ERROR: Applying offer / sending answer failed: {:?}", error)));
+                        } else {
+                            message_diagnostics.update(|entries| entries.push("Remote offer applied and answer sent".into()));
+                        }
                     });
                 }
                 "ice-candidate" => if let Some(candidate) = message.candidate {
+                    message_diagnostics.update(|entries| entries.push("Received remote ICE candidate".into()));
                     let init = RtcIceCandidateInit::new(&candidate);
                     if let Some(mid) = message.sdp_mid.as_deref() { init.set_sdp_mid(Some(mid)); }
                     if let Some(index) = message.sdp_m_line_index { init.set_sdp_m_line_index(Some(index)); }
-                    spawn_local(async move {
-                        match web_sys::RtcIceCandidate::new(&init) {
-                            Ok(candidate) => {
-                                if let Err(error) = JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await {
+                    if remote_description_ready.get() {
+                        spawn_local(async move {
+                            match web_sys::RtcIceCandidate::new(&init) {
+                                Ok(candidate) => if let Err(error) = JsFuture::from(peer.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate))).await {
                                     log!("Could not apply remote ICE candidate: {:?}", error);
-                                }
+                                },
+                                Err(error) => log!("Invalid remote ICE candidate: {:?}", error),
                             }
-                            Err(error) => log!("Invalid remote ICE candidate: {:?}", error),
-                        }
-                    });
+                        });
+                    } else {
+                        pending_ice.borrow_mut().push(init);
+                        message_diagnostics.update(|entries| entries.push("Queued ICE candidate until remote description is ready".into()));
+                    }
                 },
-                "error" => set_status.set("Session not found or the signaling server rejected the join.".to_string()),
+                "error" => {
+                    let reason = message.sdp.unwrap_or_else(|| "Unknown signaling error".into());
+                    message_diagnostics.update(|entries| entries.push(format!("ERROR: Signaling server: {}", reason)));
+                    set_status.set(format!("Could not join: {}", reason));
+                },
                 _ => {}
             }
         });
@@ -495,9 +565,12 @@ pub fn App() -> impl IntoView {
         on_message.forget();
 
         let track_status = set_status;
+        let track_diagnostics = set_diagnostics;
         let track_session = id.clone();
         let remote_video = remote_video_ref;
         let on_track = Closure::<dyn FnMut(RtcTrackEvent)>::new(move |event: RtcTrackEvent| {
+            let track_kind = event.track().kind();
+            track_diagnostics.update(|entries| entries.push(format!("Remote {} track received", track_kind)));
             let stream = event.streams().get(0).dyn_into::<web_sys::MediaStream>().ok()
                 .or_else(|| {
                     let stream = web_sys::MediaStream::new().ok()?;
@@ -514,11 +587,33 @@ pub fn App() -> impl IntoView {
                 video.set_muted(true);
                 video.set_autoplay(true);
                 video.set_attribute("playsinline", "true").ok();
+                for event_name in ["loadedmetadata", "playing", "waiting", "stalled", "error"] {
+                    let event_diagnostics = track_diagnostics;
+                    let event_video = video.clone();
+                    let callback = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+                        let message = format!(
+                            "Video event: {} ({}x{})",
+                            event.type_(),
+                            event_video.video_width(),
+                            event_video.video_height()
+                        );
+                        if event.type_() == "error" {
+                            event_diagnostics.update(|entries| entries.push(format!("ERROR: {}", message)));
+                        } else {
+                            event_diagnostics.update(|entries| entries.push(message));
+                        }
+                    });
+                    if let Err(error) = video.add_event_listener_with_callback(event_name, callback.as_ref().unchecked_ref()) {
+                        track_diagnostics.update(|entries| entries.push(format!("ERROR: Could not observe video {} event: {:?}", event_name, error)));
+                    }
+                    callback.forget();
+                }
                 match video.play() {
                     Ok(_) => track_status.set(format!("Connected to session {}", track_session)),
                     Err(error) => {
                         log!("Remote video playback failed: {:?}", error);
-                        track_status.set("Connected. Press play on the video to start viewing.".to_string());
+                        track_diagnostics.update(|entries| entries.push(format!("ERROR: Video play() failed: {:?}", error)));
+                        track_status.set(format!("Connected, but video playback failed: {:?}", error));
                     }
                 }
             }
@@ -527,10 +622,13 @@ pub fn App() -> impl IntoView {
         on_track.forget();
 
         let connection_status = set_status;
+        let connection_diagnostics = set_diagnostics;
         let connection_session = id.clone();
         let connection_peer = peer.clone();
         let on_connection_change = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-            let message = match connection_peer.ice_connection_state() {
+            let state = connection_peer.ice_connection_state();
+            connection_diagnostics.update(|entries| entries.push(format!("ICE connection state: {:?}", state)));
+            let message = match state {
                 RtcIceConnectionState::Checking => "Connecting to the screen sharer…".to_string(),
                 RtcIceConnectionState::Connected | RtcIceConnectionState::Completed => {
                     format!("Connected to session {}", connection_session)
@@ -545,6 +643,7 @@ pub fn App() -> impl IntoView {
         });
         peer.set_oniceconnectionstatechange(Some(on_connection_change.as_ref().unchecked_ref()));
         on_connection_change.forget();
+        set_diagnostics.update(|entries| entries.push(format!("Initial ICE connection state: {:?}", peer.ice_connection_state())));
 
         ACTIVE_PEER.with(|active| *active.borrow_mut() = Some(peer));
         ACTIVE_SOCKET.with(|active| *active.borrow_mut() = Some(socket));
@@ -752,6 +851,15 @@ pub fn App() -> impl IntoView {
                     None
                 }
             }}
+
+            {move || if !diagnostics.get().is_empty() {
+                Some(view! {
+                    <details class="diagnostics" open=true>
+                        <summary>"Connection diagnostics"</summary>
+                        <pre>{move || diagnostics.get().join("\n")}</pre>
+                    </details>
+                })
+            } else { None }}
 
         </main>
     }
