@@ -76,14 +76,18 @@ pub fn App() -> impl IntoView {
 
     let (status, set_status) = signal(String::new());
     let (diagnostics, set_diagnostics) = signal(Vec::<String>::new());
+    let (show_diagnostics, set_show_diagnostics) = signal(false);
     let (sharing, set_sharing) = signal(false);
     let (watching, set_watching) = signal(false);
     let (participant_count, set_participant_count) = signal(1usize);
     
     let video_ref: NodeRef<Video> = NodeRef::new();
     let remote_video_ref: NodeRef<Video> = NodeRef::new();
+    let UseClipboardReturn { copied, copy, .. } = use_clipboard();
+    let auto_copy = copy.clone();
 
     let start_share = move |_| {
+        let copy_session_id = auto_copy.clone();
         // Diagnostics belong to the current attempt, not the previous session.
         set_diagnostics.set(Vec::new());
         set_status.set(String::new());
@@ -112,6 +116,12 @@ pub fn App() -> impl IntoView {
             }
         };
 
+        set_diagnostics.update(|entries| {
+            entries.push(format!("Browser user agent: {}", navigator.user_agent().unwrap_or_else(|_| "unavailable".into())));
+            entries.push(format!("Platform: {}", js_sys::Reflect::get(navigator.as_ref(), &JsValue::from_str("platform")).ok().and_then(|v| v.as_string()).unwrap_or_else(|| "unavailable".into())));
+            entries.push(format!("Secure context: {}", window.is_secure_context()));
+            entries.push("Capture request: video=true, audio=true".into());
+        });
         log!("Secure context: {}", window.is_secure_context());
 
         let constraints = DisplayMediaStreamConstraints::new();
@@ -134,6 +144,14 @@ pub fn App() -> impl IntoView {
             match JsFuture::from(promise).await {
                 Ok(value) => {
                     let stream: web_sys::MediaStream = value.unchecked_into::<web_sys::MediaStream>();
+                    stream.get_tracks().for_each(&mut |track, _, _| {
+                        if let Ok(track) = track.dyn_into::<web_sys::MediaStreamTrack>() {
+                            set_diagnostics.update(|entries| entries.push(format!(
+                                "Captured track: kind={}, enabled={}, muted={}, ready_state={:?}",
+                                track.kind(), track.enabled(), track.muted(), track.ready_state()
+                            )));
+                        }
+                    });
 
                     let Some(video) = video_ref.get() else {
                         stream.get_tracks().for_each(&mut |track, _, _| {
@@ -319,10 +337,14 @@ pub fn App() -> impl IntoView {
 
                     let video: &HtmlVideoElement = video.unchecked_ref();
                     video.set_src_object(Some(&stream));
+                    // The sharer's preview is local only. Playing captured tab
+                    // audio here can feed it back into their call audio path.
+                    video.set_muted(true);
                     if let Err(err) = video.play() {
                         log!("Video playback error: {:?}", err);
                     }
                     set_session_id.set(id.clone());
+                    copy_session_id(&id);
                     set_participant_count.set(1);
                     set_sharing.set(true);
                     set_status.set(format!("Starting share session {}…", id));
@@ -356,6 +378,7 @@ pub fn App() -> impl IntoView {
                     };
                     log!("Screen capture failed: {}", details);
                     set_diagnostics.update(|entries| {
+                        entries.push("Capture result: no stream returned; source selection and audio track details are unavailable to the page.".into());
                         entries.push(format!(
                             "ERROR: Screen capture rejected; exception={} ; message={}",
                             name, message
@@ -674,8 +697,6 @@ pub fn App() -> impl IntoView {
         set_status.set(format!("Connecting to session {}…", id));
     };
 
-    let UseClipboardReturn { copied, copy, .. } = use_clipboard();
-
     view! {
         <main class="app">
 
@@ -725,7 +746,7 @@ pub fn App() -> impl IntoView {
                     node_ref=video_ref
                     autoplay=true 
                     playsinline=true 
-                    muted=false 
+                    muted=true 
                     width="340" 
                     height="220"
                     class="video-preview"
@@ -875,7 +896,16 @@ pub fn App() -> impl IntoView {
                 }
             }}
 
-            {move || if !diagnostics.get().is_empty() {
+            <label class="diagnostics-toggle">
+                <input
+                    type="checkbox"
+                    prop:checked=move || show_diagnostics.get()
+                    on:change=move |event| set_show_diagnostics.set(event_target_checked(&event))
+                />
+                "Show diagnostic logs"
+            </label>
+
+            {move || if show_diagnostics.get() && !diagnostics.get().is_empty() {
                 Some(view! {
                     <details class="diagnostics" open=true>
                         <summary>"Connection diagnostics"</summary>

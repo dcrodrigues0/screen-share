@@ -308,6 +308,21 @@ input:disabled {
     font-size: 14px;
 }
 
+.diagnostics-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    color: #aeb4c0;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.diagnostics-toggle input {
+    accent-color: #7c8cff;
+}
+
 .diagnostics {
     margin-top: 16px;
     padding: 12px;

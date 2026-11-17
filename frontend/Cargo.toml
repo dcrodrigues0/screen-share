@@ -27,6 +27,7 @@ features = [
     "MediaStreamConstraints",
     "MediaStream",
     "MediaStreamTrack",
+    "MediaStreamTrackState",
     "HtmlVideoElement",
     "RtcPeerConnection",
     "RtcRtpSender",
